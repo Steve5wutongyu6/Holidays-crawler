@@ -1,7 +1,10 @@
 # coding:utf-8
-import requests
+import importlib
 import re
-import importlib, sys
+import sys
+import os
+
+import requests
 
 importlib.reload(sys)
 import pandas as pd
@@ -20,6 +23,8 @@ from openpyxl import load_workbook
 # 中秋节	9月13日~9月15日	与周末连休	3天
 
 '''适用条件'''
+
+
 # 1. 放假时间列必须是以xx月xx日开始，且以~分隔的连续日期
 # 2. 调休上班日期列中，包含“休”“无”那行没有上班日期安排
 
@@ -46,27 +51,31 @@ class spider(object):
         return everytable
 
     # 取出放假日期范围，返回日期列表
-    def getHoliday(self, year, string):
-        string = "".join(re.findall('\d.*', string, re.S))
+    def get_holiday(self, year, string):
+        string = "".join(re.findall(r'\d.*', string, re.S))
         if string.find('年') >= 0:
             string = string[5:]
         if string.find('~') == -1:
             string = string + '~' + string
         str1 = string.split('~')
-        m1 = "".join(re.findall('\d.*(?=月\d)', str1[0], re.S))
-        d1 = "".join(re.findall('(?<=月).*\d', str1[0], re.S))
-        m2 = "".join(re.findall('\d.*(?=月\d)', str1[1], re.S))
-        d2 = "".join(re.findall('(?<=月).*\d', str1[1], re.S))
+        if year == '2020':  # 特殊处理2020年的中文括号
+            m1 = re.search(r'(\d+)月(\d+)日', str1[0]).group(1)
+            d1 = re.search(r'(\d+)月(\d+)日', str1[0]).group(2)
+            m2 = re.search(r'(\d+)月(\d+)日', str1[1]).group(1)
+            d2 = re.search(r'(\d+)月(\d+)日', str1[1]).group(2)
+        else:  # 其他年份使用英文括号
+            m1 = re.search(r'(\d+)月(\d+)日', str1[0]).group(1)
+            d1 = re.search(r'(\d+)月(\d+)日', str1[0]).group(2)
+            m2 = re.search(r'(\d+)月(\d+)日', str1[1]).group(1)
+            d2 = re.search(r'(\d+)月(\d+)日', str1[1]).group(2)
+
         # 规范化日期格式为yyyy mm dd
         if int(m1) < 10:
             m1 = '0' + m1
-
         if int(d1) < 10:
             d1 = '0' + d1
-
         if int(m2) < 10:
             m2 = '0' + m2
-
         if int(d2) < 10:
             d2 = '0' + d2
 
@@ -74,6 +83,7 @@ class spider(object):
             y1 = str(int(year) - 1)  # 如果元旦前是12月则月份要取少一年
         else:
             y1 = year
+
         # 根据日期范围获取所有连续日期
         date_list = []
         begin_date = datetime.datetime.strptime(y1 + m1 + d1, "%Y%m%d")
@@ -86,54 +96,61 @@ class spider(object):
         return date_list
 
     # 取出调休上班日期，返回日期列表
-    def getWorkday(self, year, string):
-        string = "".join(re.findall('\d.*', string, re.S))
+    def get_workday(self, year, string):
+        string = "".join(re.findall(r'\d.*', string, re.S))
         if string.find('年') >= 0:
             string = string[5:]
-        list1 = re.split('[，、]', string)
+        if year == '2020':  # 特殊处理2020年的中文括号
+            list1 = re.split(r'[，、]', string)
+        else:  # 其他年份使用英文括号
+            list1 = re.split(r'[，、]', string)
         list2 = []
         for a in list1:
-            m1 = "".join(re.findall('\d.*(?=月\d)', a, re.S))
-            d1 = "".join(re.findall('(?<=月).*\d', a, re.S))
-            if int(m1) == 12:
-                y1 = str(int(year) - 1)
-            else:
-                y1 = year
-            if int(m1) < 10:
-                m1 = '0' + m1
-            if int(d1) < 10:
-                d1 = '0' + d1
+            match = re.search(r'(\d+)月(\d+)日', a)
+            if match:
+                m1 = match.group(1)
+                d1 = match.group(2)
+                if int(m1) == 12:
+                    y1 = str(int(year) - 1)
+                else:
+                    y1 = year
+                if int(m1) < 10:
+                    m1 = '0' + m1
+                if int(d1) < 10:
+                    d1 = '0' + d1
 
-            list2.append(y1 + m1 + d1)
+                list2.append(y1 + m1 + d1)
 
         return list2
 
     # 分割源码获得每年所有假日表：日期、节日名称、是否放假
-    def getInfo(self, eachyear):
+    def get_info(self, eachyear):
         info = {}
-        ho = re.findall('jiad/">(.*?)</a>', eachyear, re.S)  # 节日名称列表
-        year = re.search('<a href="/(.*?)_', eachyear, re.S).group(1)  # 年份字符串
-        a = re.findall('<td>(.*?)</td>', eachyear, re.S)  # 除了节日名称列的其他数据列表，包括放假时间、调休上班日期、放假天数
+        ho = re.findall(r'jiad/">(.*?)</a>', eachyear, re.S)  # 节日名称列表
+        year = re.search(r'<a href="/(.*?)_', eachyear, re.S).group(1)  # 年份字符串
+        a = re.findall(r'<td>(.*?)</td>', eachyear, re.S)  # 除了节日名称列的其他数据列表，包括放假时间、调休上班日期、放假天数
         j = len(a)
+
         # 得出放假日期
         i = 0
         k = 0
         df = pd.DataFrame()
-        while (i < j):
+        while i < j:
             if i > j:
                 continue
             holidayname = ''.join(ho[k])
-            holiday_list = list(map(int, self.getHoliday(year, a[i])))
+            holiday_list = list(map(int, self.get_holiday(year, a[i])))
             df1 = pd.DataFrame(holiday_list, columns=['period_id'])
             df1['holiday_name'], df1['is_holiday'] = [holidayname, 1]
             df = pd.concat([df, df1])
             i += 3
             k += 1
+
         # 得出调休上班日期
         m = 1
         n = 0
         df2 = pd.DataFrame()
-        while (m < j):
+        while m < j:
             if m > j:
                 continue
             holidayname = ''.join(ho[n])
@@ -144,7 +161,7 @@ class spider(object):
             n += 1
             if checkdata >= 0 or checkdata2 >= 0:  # 如果该节日没有特殊调休安排则跳过循环
                 continue
-            work_list = list(map(int, self.getWorkday(year, data)))
+            work_list = list(map(int, self.get_workday(year, data)))
             df_temp = pd.DataFrame(work_list, columns=['period_id'])
             df_temp['holiday_name'], df_temp['is_holiday'] = [holidayname, 0]
             df2 = pd.concat([df2, df_temp])
@@ -154,7 +171,7 @@ class spider(object):
     def write2excel(self, excelWriter, year, data):
         excel_header = list(data.columns.values)  # excel的标题
         data.to_excel(excelWriter, sheet_name=year, header=excel_header, index=False)
-        writer.save()
+        writer._save()
         writer.close()
 
     # 将结果追加到excel
@@ -170,8 +187,8 @@ class spider(object):
 if __name__ == '__main__':
     # 初始化参数
     url = 'https://fangjia.51240.com/2018__fangjia/'  # 抓取的页面
-    start_page = 2012  # 抓取开始年份
-    end_page = 2019  # 抓取结束年份
+    start_page = 2020  # 抓取开始年份
+    end_page = 2024  # 抓取结束年份
     filepath = 'data/节假日安排爬虫数据.xlsx'  # 写入excel文件路径
 
     print(u'初始化类..')
@@ -183,11 +200,14 @@ if __name__ == '__main__':
         html = myspider.getSource(link)
         everyyear = myspider.geteveyTable(html)
         for each in everyyear:
-            df = pd.concat([df, myspider.getInfo(each)])
+            df = pd.concat([df, myspider.get_info(each)])
     df.index = range(len(df))
     df.sort_values(by='period_id', inplace=True)
 
     # 创建ExcelWriter对象
+    # 检查并创建文件夹
+    if not os.path.exists('data'):
+        os.makedirs('data')
     writer = pd.ExcelWriter(filepath, engine='openpyxl')
 
     # sheet名
